@@ -8,7 +8,6 @@ const esMovil = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 const MODELO_PRINCIPAL = esMovil
   ? "Xenova/modnet"
   : "studioludens/birefnet-lite-512";
-const MODELO_RESPALDO = "Xenova/modnet";
 
 // Etiquetas en inglés y específicas: mejor precisión en zero-shot
 const TIPOS = [
