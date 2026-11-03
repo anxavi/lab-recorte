@@ -1,14 +1,16 @@
 import { useState } from "react";
 import { pipeline, RawImage } from "@huggingface/transformers";
 
-// Detectar si es móvil para ajustar dispositivo y memoria
+// Detectar si es móvil para ajustar modelo, resolución y dispositivo
 const esMovil = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-// Modelo principal de recorte: BirefNet (mayor calidad)
-// Respaldo: MODNet (ligero y estable)
-const MODELO_PRINCIPAL = "studioludens/birefnet-lite-512";
+// Recorte: BiRefNet en escritorio (mejor calidad), MODNet en móvil (estable)
+const MODELO_PRINCIPAL = esMovil
+  ? "Xenova/modnet"
+  : "studioludens/birefnet-lite-512";
 const MODELO_RESPALDO = "Xenova/modnet";
 
+// Etiquetas en inglés y específicas: mejor precisión en zero-shot
 const TIPOS = [
   "t-shirt",
   "shirt",
@@ -77,11 +79,13 @@ type Tags = {
   tipo: string;
   color: string;
   patron: string;
+  tipoScore: number;
+  colorScore: number;
+  patronScore: number;
 };
 
-// Caché de pipelines (Singleton): se crean una sola vez
+// Caché de pipelines (Singleton)
 let pipelinePrincipalCacheado: any = null;
-let pipelineRespaldoCacheado: any = null;
 let clasificadorCacheado: any = null;
 
 async function getPipelinePrincipal() {
@@ -89,7 +93,7 @@ async function getPipelinePrincipal() {
     const opciones =
       !esMovil && navigator.gpu
         ? { device: "webgpu" as const, dtype: "fp16" as const }
-        : { dtype: "q8" as const };
+        : {};
     pipelinePrincipalCacheado = await pipeline(
       "background-removal",
       MODELO_PRINCIPAL,
@@ -97,16 +101,6 @@ async function getPipelinePrincipal() {
     );
   }
   return pipelinePrincipalCacheado;
-}
-
-async function getPipelineRespaldo() {
-  if (!pipelineRespaldoCacheado) {
-    pipelineRespaldoCacheado = await pipeline(
-      "background-removal",
-      MODELO_RESPALDO,
-    );
-  }
-  return pipelineRespaldoCacheado;
 }
 
 async function getClasificador() {
@@ -120,7 +114,7 @@ async function getClasificador() {
   return clasificadorCacheado;
 }
 
-// Comprimir/redimensionar cualquier foto (especialmente de cámara) a máx. 1024 px
+// Comprimir/redimensionar: 768 px en móvil, 1024 px en escritorio
 async function comprimirImagen(file: File): Promise<string> {
   const img = new Image();
   const url = URL.createObjectURL(file);
@@ -237,6 +231,9 @@ async function generarTags(imagenRecortada: string): Promise<Tags> {
     tipo: tipoRes[0].label,
     color: colorRes[0].label,
     patron: patronRes[0].label,
+    tipoScore: tipoRes[0].score,
+    colorScore: colorRes[0].score,
+    patronScore: patronRes[0].score,
   };
 }
 
@@ -266,25 +263,13 @@ export default function App() {
         imgOrig.onload = resolve;
       });
 
-      setFase("Recortando con modelo de alta calidad...");
-      let resultadoRecorte: Resultado;
-      try {
-        resultadoRecorte = await ejecutarRecorte(
-          getPipelinePrincipal,
-          MODELO_PRINCIPAL,
-          foto,
-          imgOrig,
-        );
-      } catch (e) {
-        console.warn("Modelo principal falló, usando respaldo:", e);
-        setFase("Usando modelo de respaldo...");
-        resultadoRecorte = await ejecutarRecorte(
-          getPipelineRespaldo,
-          MODELO_RESPALDO,
-          foto,
-          imgOrig,
-        );
-      }
+      setFase("Recortando...");
+      const resultadoRecorte = await ejecutarRecorte(
+        getPipelinePrincipal,
+        MODELO_PRINCIPAL,
+        foto,
+        imgOrig,
+      );
 
       setResultado(resultadoRecorte);
       setDetalle(
@@ -331,11 +316,11 @@ export default function App() {
         >
           <strong>Tags detectados:</strong>
           <br />
-          Tipo: {tags.tipo}
+          Tipo: {tags.tipo} ({(tags.tipoScore * 100).toFixed(0)}%)
           <br />
-          Color: {tags.color}
+          Color: {tags.color} ({(tags.colorScore * 100).toFixed(0)}%)
           <br />
-          Patrón: {tags.patron}
+          Patrón: {tags.patron} ({(tags.patronScore * 100).toFixed(0)}%)
         </div>
       )}
       <div style={{ display: "flex", gap: 20, marginTop: 20 }}>
