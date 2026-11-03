@@ -4,48 +4,66 @@ import { pipeline, RawImage } from "@huggingface/transformers";
 // Detectar si es móvil para ajustar dispositivo y memoria
 const esMovil = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-// Modelo principal de recorte: RMBG-1.4 (mayor calidad)
+// Modelo principal de recorte: BirefNet (mayor calidad)
 // Respaldo: MODNet (ligero y estable)
-const MODELO_PRINCIPAL = "briaai/RMBG-1.4";
+const MODELO_PRINCIPAL = "studioludens/birefnet-lite-512";
 const MODELO_RESPALDO = "Xenova/modnet";
 
 const TIPOS = [
-  "camiseta",
-  "camisa",
-  "pantalón",
-  "pantalón corto",
-  "falda",
-  "vestido",
-  "chaqueta",
-  "abrigo",
-  "sudadera",
-  "jersey",
-  "zapatos",
-  "bolso",
+  "t-shirt",
+  "shirt",
+  "blouse",
+  "polo shirt",
+  "sweater",
+  "hoodie",
+  "jacket",
+  "coat",
+  "blazer",
+  "dress",
+  "skirt",
+  "trousers",
+  "jeans",
+  "shorts",
+  "leggings",
+  "shoes",
+  "sneakers",
+  "boots",
+  "bag",
+  "hat",
 ];
+
 const COLORES = [
-  "negro",
-  "blanco",
-  "gris",
+  "black",
+  "white",
+  "gray",
   "beige",
-  "marrón",
-  "azul",
-  "azul marino",
-  "verde",
-  "rojo",
-  "rosa",
-  "morado",
-  "amarillo",
-  "naranja",
+  "cream",
+  "brown",
+  "navy blue",
+  "blue",
+  "light blue",
+  "green",
+  "olive green",
+  "red",
+  "burgundy",
+  "pink",
+  "purple",
+  "yellow",
+  "orange",
+  "multicolor",
 ];
+
 const PATRONES = [
-  "liso",
-  "rayas",
-  "cuadros",
-  "estampado floral",
-  "estampado geométrico",
-  "degradado",
-  "estampado abstracto",
+  "solid color",
+  "striped",
+  "plaid",
+  "floral print",
+  "polka dot",
+  "geometric print",
+  "animal print",
+  "color block",
+  "gradient",
+  "abstract print",
 ];
 
 type Resultado = {
