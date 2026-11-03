@@ -89,7 +89,7 @@ async function getPipelinePrincipal() {
     const opciones =
       !esMovil && navigator.gpu
         ? { device: "webgpu" as const, dtype: "fp16" as const }
-        : {};
+        : { dtype: "q8" as const };
     pipelinePrincipalCacheado = await pipeline(
       "background-removal",
       MODELO_PRINCIPAL,
@@ -129,7 +129,7 @@ async function comprimirImagen(file: File): Promise<string> {
     img.onload = resolve;
   });
 
-  const MAX = 1024;
+  const MAX = esMovil ? 768 : 1024;
   const escala = Math.min(1, MAX / Math.max(img.width, img.height));
   const canvas = document.createElement("canvas");
   canvas.width = Math.round(img.width * escala);
