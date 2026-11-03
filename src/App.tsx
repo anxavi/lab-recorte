@@ -1,12 +1,13 @@
 import { useState } from "react";
 import { pipeline, RawImage } from "@huggingface/transformers";
 
-// Detectar si es móvil para usar modo ligero
+// Detectar si es móvil para ajustar dispositivo y memoria
 const esMovil = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
 
-// En escritorio: 2 modelos para elegir el mejor. En móvil: solo MODNet (ligero)
-const MODELOS_ESCRITORIO = ["Xenova/modnet", "studioludens/birefnet-lite-512"];
-const MODELOS_MOVIL = ["Xenova/modnet"];
+// Modelo principal de recorte: RMBG-1.4 (mayor calidad)
+// Respaldo: MODNet (ligero y estable)
+const MODELO_PRINCIPAL = "briaai/RMBG-1.4";
+const MODELO_RESPALDO = "Xenova/modnet";
 
 const TIPOS = [
   "camiseta",
@@ -60,8 +61,35 @@ type Tags = {
   patron: string;
 };
 
-// Caché del clasificador (Singleton): se crea una sola vez
+// Caché de pipelines (Singleton): se crean una sola vez
+let pipelinePrincipalCacheado: any = null;
+let pipelineRespaldoCacheado: any = null;
 let clasificadorCacheado: any = null;
+
+async function getPipelinePrincipal() {
+  if (!pipelinePrincipalCacheado) {
+    const opciones =
+      !esMovil && navigator.gpu
+        ? { device: "webgpu" as const, dtype: "fp16" as const }
+        : {};
+    pipelinePrincipalCacheado = await pipeline(
+      "background-removal",
+      MODELO_PRINCIPAL,
+      opciones,
+    );
+  }
+  return pipelinePrincipalCacheado;
+}
+
+async function getPipelineRespaldo() {
+  if (!pipelineRespaldoCacheado) {
+    pipelineRespaldoCacheado = await pipeline(
+      "background-removal",
+      MODELO_RESPALDO,
+    );
+  }
+  return pipelineRespaldoCacheado;
+}
 
 async function getClasificador() {
   if (!clasificadorCacheado) {
@@ -72,6 +100,27 @@ async function getClasificador() {
     );
   }
   return clasificadorCacheado;
+}
+
+// Comprimir/redimensionar cualquier foto (especialmente de cámara) a máx. 1024 px
+async function comprimirImagen(file: File): Promise<string> {
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.src = url;
+  await new Promise((resolve) => {
+    img.onload = resolve;
+  });
+
+  const MAX = 1024;
+  const escala = Math.min(1, MAX / Math.max(img.width, img.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * escala);
+  canvas.height = Math.round(img.height * escala);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  URL.revokeObjectURL(url);
+
+  return canvas.toDataURL("image/jpeg", 0.9);
 }
 
 function calcularMetricas(img: RawImage, fotoOriginal: HTMLImageElement) {
@@ -134,13 +183,14 @@ function calcularMetricas(img: RawImage, fotoOriginal: HTMLImageElement) {
   return { preservacionBordes, densidadBordes, penalizacion };
 }
 
-async function ejecutarModelo(
-  modelo: string,
+async function ejecutarRecorte(
+  pipelineFn: () => Promise<any>,
+  nombreModelo: string,
   foto: string,
   fotoOriginal: HTMLImageElement,
 ): Promise<Resultado> {
   const inicio = performance.now();
-  const quitarFondo = await pipeline("background-removal", modelo);
+  const quitarFondo = await pipelineFn();
   const salida = await quitarFondo(foto);
   const canvas = document.createElement("canvas");
   canvas.width = salida.width;
@@ -152,7 +202,7 @@ async function ejecutarModelo(
   const m = calcularMetricas(salida, fotoOriginal);
   const puntuacion =
     m.preservacionBordes * 0.6 + m.densidadBordes * 0.2 + m.penalizacion * 0.2;
-  return { modelo, imagen, tiempo, puntuacion };
+  return { modelo: nombreModelo, imagen, tiempo, puntuacion };
 }
 
 async function generarTags(imagenRecortada: string): Promise<Tags> {
@@ -180,25 +230,9 @@ export default function App() {
   const [detalle, setDetalle] = useState<string>("");
   const [fase, setFase] = useState<string>("");
 
-  // Redimensionar cualquier foto (especialmente de cámara) a máx. 1024 px
   async function procesarArchivo(file: File) {
-    const img = new Image();
-    const url = URL.createObjectURL(file);
-    img.src = url;
-    await new Promise((resolve) => {
-      img.onload = resolve;
-    });
-
-    const MAX = 1024;
-    const escala = Math.min(1, MAX / Math.max(img.width, img.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(img.width * escala);
-    canvas.height = Math.round(img.height * escala);
-    const ctx = canvas.getContext("2d")!;
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-    URL.revokeObjectURL(url);
-
-    setFoto(canvas.toDataURL("image/jpeg", 0.9));
+    const fotoComprimida = await comprimirImagen(file);
+    setFoto(fotoComprimida);
   }
 
   async function recortar() {
@@ -214,23 +248,33 @@ export default function App() {
         imgOrig.onload = resolve;
       });
 
-      setFase(
-        esMovil ? "Recortando (modo ligero)..." : "Recortando con 2 modelos...",
-      );
-      const modelosAUsar = esMovil ? MODELOS_MOVIL : MODELOS_ESCRITORIO;
-      const resultados = await Promise.all(
-        modelosAUsar.map((m) => ejecutarModelo(m, foto, imgOrig)),
-      );
-      const mejor = resultados.reduce((a, b) =>
-        b.puntuacion > a.puntuacion ? b : a,
-      );
-      setResultado(mejor);
+      setFase("Recortando con modelo de alta calidad...");
+      let resultadoRecorte: Resultado;
+      try {
+        resultadoRecorte = await ejecutarRecorte(
+          getPipelinePrincipal,
+          MODELO_PRINCIPAL,
+          foto,
+          imgOrig,
+        );
+      } catch (e) {
+        console.warn("Modelo principal falló, usando respaldo:", e);
+        setFase("Usando modelo de respaldo...");
+        resultadoRecorte = await ejecutarRecorte(
+          getPipelineRespaldo,
+          MODELO_RESPALDO,
+          foto,
+          imgOrig,
+        );
+      }
+
+      setResultado(resultadoRecorte);
       setDetalle(
-        `Ganador: ${mejor.modelo} (puntuación ${mejor.puntuacion.toFixed(3)}, ${mejor.tiempo.toFixed(1)}s)`,
+        `Modelo: ${resultadoRecorte.modelo} (puntuación ${resultadoRecorte.puntuacion.toFixed(3)}, ${resultadoRecorte.tiempo.toFixed(1)}s)`,
       );
 
       setFase("Identificando prenda...");
-      const tagsGenerados = await generarTags(mejor.imagen);
+      const tagsGenerados = await generarTags(resultadoRecorte.imagen);
       setTags(tagsGenerados);
       setFase("");
     } catch (e) {
