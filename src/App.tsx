@@ -65,7 +65,6 @@ let clasificadorCacheado: any = null;
 
 async function getClasificador() {
   if (!clasificadorCacheado) {
-    // WebGPU solo en escritorio; en móvil usamos WASM (más estable en memoria)
     clasificadorCacheado = await pipeline(
       "zero-shot-image-classification",
       "ff13/fashion-clip",
@@ -73,27 +72,6 @@ async function getClasificador() {
     );
   }
   return clasificadorCacheado;
-}
-
-// Redimensionar cualquier foto (especialmente de cámara) a máx. 1024 px
-async function procesarArchivo(file: File) {
-  const img = new Image();
-  const url = URL.createObjectURL(file);
-  img.src = url;
-  await new Promise((resolve) => {
-    img.onload = resolve;
-  });
-
-  const MAX = 1024;
-  const escala = Math.min(1, MAX / Math.max(img.width, img.height));
-  const canvas = document.createElement("canvas");
-  canvas.width = Math.round(img.width * escala);
-  canvas.height = Math.round(img.height * escala);
-  const ctx = canvas.getContext("2d")!;
-  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-  URL.revokeObjectURL(url);
-
-  setFoto(canvas.toDataURL("image/jpeg", 0.9));
 }
 
 function calcularMetricas(img: RawImage, fotoOriginal: HTMLImageElement) {
@@ -201,6 +179,27 @@ export default function App() {
   const [cargando, setCargando] = useState(false);
   const [detalle, setDetalle] = useState<string>("");
   const [fase, setFase] = useState<string>("");
+
+  // Redimensionar cualquier foto (especialmente de cámara) a máx. 1024 px
+  async function procesarArchivo(file: File) {
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.src = url;
+    await new Promise((resolve) => {
+      img.onload = resolve;
+    });
+
+    const MAX = 1024;
+    const escala = Math.min(1, MAX / Math.max(img.width, img.height));
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.round(img.width * escala);
+    canvas.height = Math.round(img.height * escala);
+    const ctx = canvas.getContext("2d")!;
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    URL.revokeObjectURL(url);
+
+    setFoto(canvas.toDataURL("image/jpeg", 0.9));
+  }
 
   async function recortar() {
     if (!foto) return;
