@@ -75,6 +75,27 @@ async function getClasificador() {
   return clasificadorCacheado;
 }
 
+// Redimensionar cualquier foto (especialmente de cámara) a máx. 1024 px
+async function procesarArchivo(file: File) {
+  const img = new Image();
+  const url = URL.createObjectURL(file);
+  img.src = url;
+  await new Promise((resolve) => {
+    img.onload = resolve;
+  });
+
+  const MAX = 1024;
+  const escala = Math.min(1, MAX / Math.max(img.width, img.height));
+  const canvas = document.createElement("canvas");
+  canvas.width = Math.round(img.width * escala);
+  canvas.height = Math.round(img.height * escala);
+  const ctx = canvas.getContext("2d")!;
+  ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  URL.revokeObjectURL(url);
+
+  setFoto(canvas.toDataURL("image/jpeg", 0.9));
+}
+
 function calcularMetricas(img: RawImage, fotoOriginal: HTMLImageElement) {
   const w = img.width;
   const h = img.height;
@@ -227,7 +248,7 @@ export default function App() {
       <input
         type="file"
         accept="image/*"
-        onChange={(e) => setFoto(URL.createObjectURL(e.target.files![0]))}
+        onChange={(e) => procesarArchivo(e.target.files![0])}
       />
       <button onClick={recortar} disabled={!foto || cargando}>
         {cargando ? "Procesando..." : "Recortar e identificar"}
