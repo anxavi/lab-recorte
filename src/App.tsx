@@ -66,11 +66,10 @@ let clasificadorCacheado: any = null;
 async function getClasificador() {
   if (!clasificadorCacheado) {
     // WebGPU solo en escritorio; en móvil usamos WASM (más estable en memoria)
-    const opciones = !esMovil && navigator.gpu ? { device: "webgpu" } : {};
     clasificadorCacheado = await pipeline(
       "zero-shot-image-classification",
       "ff13/fashion-clip",
-      opciones,
+      !esMovil && navigator.gpu ? { device: "webgpu" as const } : {},
     );
   }
   return clasificadorCacheado;
