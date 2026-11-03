@@ -1,7 +1,12 @@
 import { useState } from "react";
 import { pipeline, RawImage } from "@huggingface/transformers";
 
-const MODELOS = ["Xenova/modnet", "studioludens/birefnet-lite-512"];
+// Detectar si es móvil para usar modo ligero
+const esMovil = /Android|iPhone|iPad|iPod/i.test(navigator.userAgent);
+
+// En escritorio: 2 modelos para elegir el mejor. En móvil: solo MODNet (ligero)
+const MODELOS_ESCRITORIO = ["Xenova/modnet", "studioludens/birefnet-lite-512"];
+const MODELOS_MOVIL = ["Xenova/modnet"];
 
 const TIPOS = [
   "camiseta",
@@ -42,22 +47,6 @@ const PATRONES = [
   "estampado abstracto",
 ];
 
-let clasificadorCacheado: any = null;
-
-async function getClasificador() {
-  if (!clasificadorCacheado) {
-    const opciones: { device?: "webgpu" } = navigator.gpu
-      ? { device: "webgpu" }
-      : {};
-    clasificadorCacheado = await pipeline(
-      "zero-shot-image-classification",
-      "ff13/fashion-clip",
-      opciones,
-    );
-  }
-  return clasificadorCacheado;
-}
-
 type Resultado = {
   modelo: string;
   imagen: string;
@@ -70,6 +59,22 @@ type Tags = {
   color: string;
   patron: string;
 };
+
+// Caché del clasificador (Singleton): se crea una sola vez
+let clasificadorCacheado: any = null;
+
+async function getClasificador() {
+  if (!clasificadorCacheado) {
+    // WebGPU solo en escritorio; en móvil usamos WASM (más estable en memoria)
+    const opciones = !esMovil && navigator.gpu ? { device: "webgpu" } : {};
+    clasificadorCacheado = await pipeline(
+      "zero-shot-image-classification",
+      "ff13/fashion-clip",
+      opciones,
+    );
+  }
+  return clasificadorCacheado;
+}
 
 function calcularMetricas(img: RawImage, fotoOriginal: HTMLImageElement) {
   const w = img.width;
@@ -175,6 +180,7 @@ export default function App() {
   const [tags, setTags] = useState<Tags | null>(null);
   const [cargando, setCargando] = useState(false);
   const [detalle, setDetalle] = useState<string>("");
+  const [fase, setFase] = useState<string>("");
 
   async function recortar() {
     if (!foto) return;
@@ -182,13 +188,19 @@ export default function App() {
     setDetalle("");
     setTags(null);
     try {
+      setFase("Preparando imagen...");
       const imgOrig = new Image();
       imgOrig.src = foto;
       await new Promise((resolve) => {
         imgOrig.onload = resolve;
       });
+
+      setFase(
+        esMovil ? "Recortando (modo ligero)..." : "Recortando con 2 modelos...",
+      );
+      const modelosAUsar = esMovil ? MODELOS_MOVIL : MODELOS_ESCRITORIO;
       const resultados = await Promise.all(
-        MODELOS.map((m) => ejecutarModelo(m, foto, imgOrig)),
+        modelosAUsar.map((m) => ejecutarModelo(m, foto, imgOrig)),
       );
       const mejor = resultados.reduce((a, b) =>
         b.puntuacion > a.puntuacion ? b : a,
@@ -197,10 +209,15 @@ export default function App() {
       setDetalle(
         `Ganador: ${mejor.modelo} (puntuación ${mejor.puntuacion.toFixed(3)}, ${mejor.tiempo.toFixed(1)}s)`,
       );
+
+      setFase("Identificando prenda...");
       const tagsGenerados = await generarTags(mejor.imagen);
       setTags(tagsGenerados);
+      setFase("");
     } catch (e) {
-      alert("Error: " + (e as Error).message);
+      setDetalle("ERROR: " + (e as Error).message);
+      setFase("");
+      console.error(e);
     }
     setCargando(false);
   }
@@ -216,6 +233,11 @@ export default function App() {
       <button onClick={recortar} disabled={!foto || cargando}>
         {cargando ? "Procesando..." : "Recortar e identificar"}
       </button>
+      {fase && (
+        <p>
+          <strong>{fase}</strong>
+        </p>
+      )}
       {detalle && <p>{detalle}</p>}
       {tags && (
         <div
